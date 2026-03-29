@@ -1,13 +1,24 @@
+// TransactionEndpoints.cs — Minimal API endpoint definitions for transaction CRUD operations.
+// Supports single and batch create/delete, with paginated listing and filtering.
+
 using CashewAPI.Models;
 using CashewAPI.Models.ApiModels;
 using CashewAPI.Services;
 
 namespace CashewAPI.Endpoints;
 
+/// <summary>
+/// Defines the <c>/api/transactions</c> endpoint group for managing financial transactions.
+/// All endpoints require the database to be loaded via <c>POST /api/sync/pull</c> first.
+/// </summary>
 public static class TransactionEndpoints
 {
+    /// <summary>Maximum allowed absolute value for a transaction amount.</summary>
     private const double MaxAmount = 999_999_999_999;
 
+    /// <summary>
+    /// Registers all transaction-related routes on the application.
+    /// </summary>
     public static void MapTransactionEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/transactions").WithTags("Transactions");
@@ -20,6 +31,9 @@ public static class TransactionEndpoints
         group.MapPost("/batch-delete", BatchDeleteTransactions).WithName("BatchDeleteTransactions");
     }
 
+    /// <summary>
+    /// GET /api/transactions — Returns a paginated, filterable list of transactions.
+    /// </summary>
     private static IResult GetTransactions(
         ICashewDatabase db,
         int page = 1,
@@ -33,6 +47,7 @@ public static class TransactionEndpoints
         if (!db.IsLoaded)
             return Results.Json(new ErrorResponse { Error = "Database not loaded. Call POST /api/sync/pull first." }, statusCode: 503);
 
+        // Clamp pagination parameters to valid range
         if (page < 1) page = 1;
         if (pageSize < 1) pageSize = 1;
         if (pageSize > 100) pageSize = 100;
@@ -49,6 +64,9 @@ public static class TransactionEndpoints
         });
     }
 
+    /// <summary>
+    /// GET /api/transactions/{pk} — Returns a single transaction by primary key.
+    /// </summary>
     private static IResult GetTransaction(ICashewDatabase db, string pk)
     {
         if (!db.IsLoaded)
@@ -61,6 +79,9 @@ public static class TransactionEndpoints
         return Results.Ok(TransactionResponse.FromTransaction(transaction));
     }
 
+    /// <summary>
+    /// POST /api/transactions — Creates a single transaction after validation.
+    /// </summary>
     private static IResult CreateTransaction(ICashewDatabase db, CreateTransactionRequest request)
     {
         if (!db.IsLoaded)
@@ -77,6 +98,10 @@ public static class TransactionEndpoints
             TransactionResponse.FromTransaction(transaction));
     }
 
+    /// <summary>
+    /// POST /api/transactions/batch — Creates up to 1000 transactions in a single batch.
+    /// Validates all items before inserting any (all-or-nothing).
+    /// </summary>
     private static IResult BatchCreateTransactions(ICashewDatabase db, BatchCreateTransactionRequest request)
     {
         if (!db.IsLoaded)
@@ -88,6 +113,7 @@ public static class TransactionEndpoints
         if (request.Transactions.Count > 1000)
             return Results.BadRequest(new ErrorResponse { Error = "Maximum 1000 transactions per batch." });
 
+        // Validate every transaction before inserting any
         var transactions = new List<Transaction>();
         for (int i = 0; i < request.Transactions.Count; i++)
         {
@@ -104,6 +130,9 @@ public static class TransactionEndpoints
             transactions.Select(TransactionResponse.FromTransaction).ToList());
     }
 
+    /// <summary>
+    /// DELETE /api/transactions/{pk} — Deletes a single transaction by primary key.
+    /// </summary>
     private static IResult DeleteTransaction(ICashewDatabase db, string pk)
     {
         if (!db.IsLoaded)
@@ -116,6 +145,9 @@ public static class TransactionEndpoints
         return Results.Ok(new { message = "Transaction deleted.", transactionPk = pk });
     }
 
+    /// <summary>
+    /// POST /api/transactions/batch-delete — Deletes up to 1000 transactions by primary key.
+    /// </summary>
     private static IResult BatchDeleteTransactions(ICashewDatabase db, BatchDeleteRequest request)
     {
         if (!db.IsLoaded)
@@ -132,6 +164,11 @@ public static class TransactionEndpoints
         return Results.Ok(new { message = $"{deletedCount} transaction(s) deleted.", deletedCount });
     }
 
+    /// <summary>
+    /// Validates a <see cref="CreateTransactionRequest"/> against business rules
+    /// and ensures referenced categories, subcategories, and wallets exist.
+    /// </summary>
+    /// <returns>An error message string, or <c>null</c> if valid.</returns>
     private static string? ValidateCreateRequest(ICashewDatabase db, CreateTransactionRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
@@ -153,6 +190,7 @@ public static class TransactionEndpoints
         if (category == null)
             return $"Category '{request.CategoryFk}' not found.";
 
+        // Verify subcategory exists and belongs to the specified parent category
         if (!string.IsNullOrEmpty(request.SubCategoryFk))
         {
             var subCategory = db.GetCategory(request.SubCategoryFk);
@@ -162,6 +200,7 @@ public static class TransactionEndpoints
                 return $"SubCategory '{request.SubCategoryFk}' does not belong to category '{request.CategoryFk}'.";
         }
 
+        // Verify wallet exists (PK "0" is the default wallet and always valid)
         if (!string.IsNullOrEmpty(request.WalletFk) && request.WalletFk != "0")
         {
             var wallet = db.GetWallet(request.WalletFk);
@@ -172,12 +211,17 @@ public static class TransactionEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Maps an API request DTO to a domain <see cref="Transaction"/> entity,
+    /// generating a new UUID primary key and normalising the amount sign.
+    /// </summary>
     private static Transaction MapToTransaction(CreateTransactionRequest request)
     {
         return new Transaction
         {
             TransactionPk = Guid.NewGuid().ToString(),
             Name = request.Name,
+            // Income amounts are stored as positive, expenses as negative
             Amount = request.Income ? Math.Abs(request.Amount) : -Math.Abs(request.Amount),
             Note = request.Note,
             CategoryFk = request.CategoryFk,

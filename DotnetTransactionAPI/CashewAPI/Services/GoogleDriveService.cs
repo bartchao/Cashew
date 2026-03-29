@@ -1,20 +1,33 @@
+// GoogleDriveService.cs — Google Drive integration for downloading/uploading Cashew SQLite databases.
+// Uses a service-account credential to authenticate with the Google Drive API v3.
+
 using Google.Apis.Auth.OAuth2;
 using Google.Apis.Drive.v3;
 using Google.Apis.Services;
 
 namespace CashewAPI.Services;
 
+/// <summary>
+/// Implements <see cref="IGoogleDriveService"/> using the Google Drive API v3.
+/// The Drive client is lazily initialised from a service-account JSON credential file.
+/// </summary>
 public class GoogleDriveService : IGoogleDriveService
 {
     private readonly Lazy<DriveService> _driveService;
     private readonly ILogger<GoogleDriveService> _logger;
 
+    /// <summary>
+    /// Initialises the service with a lazily-created <see cref="DriveService"/>
+    /// authenticated via the credential path specified in configuration.
+    /// </summary>
     public GoogleDriveService(IConfiguration configuration, ILogger<GoogleDriveService> logger)
     {
         _logger = logger;
 
         var credentialPath = configuration.GetValue<string>("GoogleDrive:CredentialPath");
 
+        // Defer Drive client creation until first use to avoid startup failures
+        // when credentials are not yet available (e.g., in tests).
         _driveService = new Lazy<DriveService>(() =>
         {
             if (string.IsNullOrEmpty(credentialPath))
@@ -31,8 +44,10 @@ public class GoogleDriveService : IGoogleDriveService
         });
     }
 
+    /// <inheritdoc />
     public async Task<(byte[] fileBytes, string fileName)> DownloadLatestCashewDb(string? fileId = null)
     {
+        // If a specific file ID was provided, download it directly
         if (!string.IsNullOrEmpty(fileId))
         {
             return await DownloadFileById(fileId);
@@ -57,6 +72,7 @@ public class GoogleDriveService : IGoogleDriveService
         return await DownloadFileById(file.Id, file.Name);
     }
 
+    /// <inheritdoc />
     public async Task<string> UploadCashewDb(byte[] fileBytes, string fileName)
     {
         var fileMetadata = new Google.Apis.Drive.v3.Data.File
@@ -80,6 +96,11 @@ public class GoogleDriveService : IGoogleDriveService
         return uploadedFile.Id;
     }
 
+    /// <summary>
+    /// Downloads a file from Google Drive by its unique file ID.
+    /// </summary>
+    /// <param name="fileId">Google Drive file ID.</param>
+    /// <param name="knownFileName">Optional pre-fetched file name to avoid an extra metadata request.</param>
     private async Task<(byte[] fileBytes, string fileName)> DownloadFileById(string fileId, string? knownFileName = null)
     {
         // Get file metadata if name not known

@@ -1,25 +1,42 @@
+// CashewDatabase.cs — SQLite-backed implementation of ICashewDatabase.
+// Manages a local copy of the Cashew budget app's SQLite database file.
+// All date/time values are stored as Unix milliseconds (Int64) in the database.
+
 using CashewAPI.Models;
 using Microsoft.Data.Sqlite;
 
 namespace CashewAPI.Services;
 
+/// <summary>
+/// Singleton service that loads a Cashew SQLite database file into a local directory
+/// and provides thread-safe CRUD operations against it.
+/// Write operations are serialised with a <see cref="SemaphoreSlim"/> to prevent concurrent modification.
+/// </summary>
 public class CashewDatabase : ICashewDatabase, IDisposable
 {
     private readonly string _dbDirectory;
     private string? _dbPath;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
+    /// <inheritdoc />
     public bool IsLoaded => _dbPath != null && File.Exists(_dbPath);
+
+    /// <inheritdoc />
     public string? LoadedFileName { get; private set; }
+
+    /// <inheritdoc />
     public DateTime? LastSyncTime { get; private set; }
 
+    /// <summary>
+    /// Initialises the database directory and auto-detects any previously loaded database file.
+    /// </summary>
     public CashewDatabase(IConfiguration configuration)
     {
         _dbDirectory = configuration.GetValue<string>("DatabaseDirectory")
             ?? Path.Combine(Path.GetTempPath(), "CashewAPI");
         Directory.CreateDirectory(_dbDirectory);
 
-        // Auto-detect existing database file
+        // Auto-detect existing database file from a previous session
         var existingDb = Path.Combine(_dbDirectory, "cashew.db");
         if (File.Exists(existingDb))
         {
@@ -29,6 +46,10 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Builds a SQLite connection string pointing to the currently loaded database file.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when no database has been loaded.</exception>
     private string GetConnectionString()
     {
         if (_dbPath == null)
@@ -36,6 +57,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return $"Data Source={_dbPath}";
     }
 
+    /// <inheritdoc />
     public void LoadDatabase(byte[] fileBytes, string fileName)
     {
         _lock.Wait();
@@ -52,6 +74,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public byte[] ExportDatabase()
     {
         if (_dbPath == null || !File.Exists(_dbPath))
@@ -61,33 +84,42 @@ public class CashewDatabase : ICashewDatabase, IDisposable
 
     // --- DateTime Helpers ---
     // Cashew stores dates as integer milliseconds since Unix epoch
+
+    /// <summary>Converts a <see cref="DateTime"/> to Unix epoch milliseconds.</summary>
     private static long DateTimeToUnixMs(DateTime dt)
         => new DateTimeOffset(dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime())
             .ToUnixTimeMilliseconds();
 
+    /// <summary>Converts Unix epoch milliseconds to a UTC <see cref="DateTime"/>.</summary>
     private static DateTime UnixMsToDateTime(long ms)
         => DateTimeOffset.FromUnixTimeMilliseconds(ms).UtcDateTime;
 
+    /// <summary>Reads a nullable DateTime column stored as Unix milliseconds.</summary>
     private static DateTime? ReadNullableDateTime(SqliteDataReader reader, int ordinal)
     {
         if (reader.IsDBNull(ordinal)) return null;
         return UnixMsToDateTime(reader.GetInt64(ordinal));
     }
 
+    /// <summary>Reads a nullable Int32 column.</summary>
     private static int? ReadNullableInt(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
 
+    /// <summary>Reads a nullable String column.</summary>
     private static string? ReadNullableString(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
+    /// <summary>Reads a boolean column stored as an integer (0/1).</summary>
     private static bool ReadBool(SqliteDataReader reader, int ordinal)
         => !reader.IsDBNull(ordinal) && reader.GetInt32(ordinal) == 1;
 
+    /// <summary>Reads a nullable boolean column stored as an integer (0/1).</summary>
     private static bool? ReadNullableBool(SqliteDataReader reader, int ordinal)
         => reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal) == 1;
 
     // --- Transactions ---
 
+    /// <inheritdoc />
     public List<Transaction> GetTransactions(int page, int pageSize,
         string? walletFk = null, string? categoryFk = null,
         DateTime? startDate = null, DateTime? endDate = null,
@@ -114,6 +146,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return results;
     }
 
+    /// <inheritdoc />
     public int GetTransactionCount(string? walletFk = null, string? categoryFk = null,
         DateTime? startDate = null, DateTime? endDate = null,
         bool? income = null)
@@ -130,6 +163,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return Convert.ToInt32(cmd.ExecuteScalar());
     }
 
+    /// <inheritdoc />
     public Transaction? GetTransaction(string transactionPk)
     {
         using var connection = new SqliteConnection(GetConnectionString());
@@ -143,6 +177,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return reader.Read() ? ReadTransaction(reader) : null;
     }
 
+    /// <inheritdoc />
     public Transaction CreateTransaction(Transaction transaction)
     {
         _lock.Wait();
@@ -159,6 +194,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public List<Transaction> CreateTransactions(List<Transaction> transactions)
     {
         _lock.Wait();
@@ -182,6 +218,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public bool DeleteTransaction(string transactionPk)
     {
         _lock.Wait();
@@ -216,6 +253,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         }
     }
 
+    /// <inheritdoc />
     public int DeleteTransactions(List<string> transactionPks)
     {
         _lock.Wait();
@@ -228,6 +266,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
             int deleted = 0;
             foreach (var pk in transactionPks)
             {
+                // Check existence before deleting to track accurate count
                 using var checkCmd = connection.CreateCommand();
                 checkCmd.CommandText = "SELECT COUNT(*) FROM transactions WHERE transaction_pk = @pk";
                 checkCmd.Parameters.AddWithValue("@pk", pk);
@@ -254,6 +293,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
 
     // --- Categories ---
 
+    /// <inheritdoc />
     public List<Category> GetCategories()
     {
         using var connection = new SqliteConnection(GetConnectionString());
@@ -270,6 +310,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return results;
     }
 
+    /// <inheritdoc />
     public Category? GetCategory(string categoryPk)
     {
         using var connection = new SqliteConnection(GetConnectionString());
@@ -285,6 +326,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
 
     // --- Wallets ---
 
+    /// <inheritdoc />
     public List<Wallet> GetWallets()
     {
         using var connection = new SqliteConnection(GetConnectionString());
@@ -301,6 +343,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return results;
     }
 
+    /// <inheritdoc />
     public Wallet? GetWallet(string walletPk)
     {
         using var connection = new SqliteConnection(GetConnectionString());
@@ -316,6 +359,10 @@ public class CashewDatabase : ICashewDatabase, IDisposable
 
     // --- Private Helpers ---
 
+    /// <summary>
+    /// Builds a SQL WHERE clause and parameter list from the supplied transaction filter criteria.
+    /// Dates are converted to Unix milliseconds to match the database storage format.
+    /// </summary>
     private static (string whereClause, List<SqliteParameter> parameters) BuildTransactionFilter(
         string? walletFk, string? categoryFk,
         DateTime? startDate, DateTime? endDate,
@@ -357,6 +404,10 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         return (whereClause, parameters);
     }
 
+    /// <summary>
+    /// Inserts a single transaction row into the database.
+    /// Converts all DateTime and bool properties to their SQLite-compatible representations.
+    /// </summary>
     private static void InsertTransaction(SqliteConnection connection, Transaction t)
     {
         using var cmd = connection.CreateCommand();
@@ -414,6 +465,12 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Records a deletion in the delete_logs table so sync clients can replicate the removal.
+    /// </summary>
+    /// <param name="connection">Open SQLite connection (within an active transaction).</param>
+    /// <param name="entryPk">Primary key of the deleted entity.</param>
+    /// <param name="type">Entity type constant from <see cref="DeleteLogType"/>.</param>
     private static void InsertDeleteLog(SqliteConnection connection, string entryPk, int type)
     {
         using var cmd = connection.CreateCommand();
@@ -427,6 +484,9 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Maps a SQLite data reader row to a <see cref="Transaction"/> domain object.
+    /// </summary>
     private static Transaction ReadTransaction(SqliteDataReader reader)
     {
         return new Transaction
@@ -465,6 +525,9 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         };
     }
 
+    /// <summary>
+    /// Maps a SQLite data reader row to a <see cref="Category"/> domain object.
+    /// </summary>
     private static Category ReadCategory(SqliteDataReader reader)
     {
         return new Category
@@ -483,6 +546,9 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         };
     }
 
+    /// <summary>
+    /// Maps a SQLite data reader row to a <see cref="Wallet"/> domain object.
+    /// </summary>
     private static Wallet ReadWallet(SqliteDataReader reader)
     {
         return new Wallet
@@ -501,6 +567,9 @@ public class CashewDatabase : ICashewDatabase, IDisposable
         };
     }
 
+    /// <summary>
+    /// Releases the write-serialisation semaphore.
+    /// </summary>
     public void Dispose()
     {
         _lock.Dispose();

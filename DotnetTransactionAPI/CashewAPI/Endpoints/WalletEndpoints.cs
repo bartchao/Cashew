@@ -1,14 +1,24 @@
+// WalletEndpoints.cs — Minimal API endpoint definitions for read-only wallet access.
+
 using CashewAPI.Models.ApiModels;
 using CashewAPI.Services;
 
 namespace CashewAPI.Endpoints;
 
+/// <summary>
+/// Defines the <c>/api/wallets</c> endpoint group for listing and retrieving wallets.
+/// Wallets are read-only through the API; they are managed in the Cashew Flutter app.
+/// </summary>
 public static class WalletEndpoints
 {
+    /// <summary>
+    /// Registers all wallet-related routes on the application.
+    /// </summary>
     public static void MapWalletEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/wallets").WithTags("Wallets");
 
+        // GET /api/wallets — List all wallets ordered by display order
         group.MapGet("/", (ICashewDatabase db) =>
         {
             if (!db.IsLoaded)
@@ -18,6 +28,7 @@ public static class WalletEndpoints
             return Results.Ok(wallets);
         }).WithName("GetWallets");
 
+        // GET /api/wallets/{pk} — Retrieve a single wallet by primary key
         group.MapGet("/{pk}", (ICashewDatabase db, string pk) =>
         {
             if (!db.IsLoaded)

@@ -1,3 +1,6 @@
+// Program.cs — Entry point for the CashewAPI .NET Minimal API application.
+// Configures services, middleware, and maps all API endpoint groups.
+
 using CashewAPI.Endpoints;
 using CashewAPI.Middleware;
 using CashewAPI.Services;
@@ -29,4 +32,8 @@ app.MapSyncEndpoints();
 app.Run();
 
 // Enable WebApplicationFactory<Program> in tests
+/// <summary>
+/// Partial class declaration to allow <c>WebApplicationFactory&lt;Program&gt;</c>
+/// to be used in integration tests.
+/// </summary>
 public partial class Program { }
