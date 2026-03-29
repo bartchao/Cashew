@@ -1,0 +1,6 @@
+@CashewAPI_HostAddress = http://localhost:5021
+
+GET {{CashewAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

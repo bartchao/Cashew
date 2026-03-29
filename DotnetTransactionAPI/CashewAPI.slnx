@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="CashewAPI.Tests/CashewAPI.Tests.csproj" />
+  <Project Path="CashewAPI/CashewAPI.csproj" />
+</Solution>
