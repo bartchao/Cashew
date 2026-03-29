@@ -361,7 +361,7 @@ public class CashewDatabase : ICashewDatabase, IDisposable
     {
         using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
-            INSERT OR REPLACE INTO transactions (
+            INSERT INTO transactions (
                 transaction_pk, paired_transaction_fk, name, amount, note,
                 category_fk, sub_category_fk, wallet_fk, date_created, date_time_modified,
                 original_date_due, income, period_length, reoccurrence, end_date,
