@@ -1,0 +1,45 @@
+# =============================================================================
+# Docker Compose file for CashewAPI
+#
+# Usage:
+#   docker compose up -d          # start the service in the background
+#   docker compose logs -f        # follow the application logs
+#   docker compose down           # stop and remove the container
+#
+# Before starting, set the API key in a .env file or export it:
+#   export CASHEW_API_KEY=your-secret-key
+# =============================================================================
+
+services:
+  cashew-api:
+    # Build the image from the Dockerfile in this directory.
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Map the container's default ASP.NET Core port to the host.
+    ports:
+      - "8080:8080"
+
+    # Configuration passed to the application via environment variables.
+    # ASP.NET Core automatically maps "__" (double-underscore) to ":" in
+    # hierarchical config keys, so GoogleDrive__CredentialPath becomes
+    # GoogleDrive:CredentialPath in the app.
+    environment:
+      - ApiKey=${CASHEW_API_KEY:-changeme}
+      - DatabaseDirectory=/app/data
+      - GoogleDrive__CredentialPath=/app/credentials/credentials.json
+
+    # Persistent volumes ensure data survives container restarts.
+    #   cashew-data        -> SQLite database files
+    #   ./credentials      -> Google Drive credentials mounted read-only
+    volumes:
+      - cashew-data:/app/data
+      - ./credentials:/app/credentials:ro
+
+    # Automatically restart the container unless it was explicitly stopped.
+    restart: unless-stopped
+
+# Named volume for database persistence across container lifecycles.
+volumes:
+  cashew-data:

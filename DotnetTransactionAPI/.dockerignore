@@ -1,0 +1,40 @@
+# =============================================================================
+# .dockerignore - Files and directories excluded from the Docker build context
+# =============================================================================
+
+# Build output directories
+**/bin/
+**/obj/
+**/out/
+
+# Test project (not needed in the production image)
+CashewAPI.Tests/
+
+# IDE and editor files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.sln.docstates
+
+# Git metadata
+.git/
+.gitignore
+
+# Credentials and secrets (never bake these into an image)
+credentials.json
+*.pfx
+*.pem
+
+# Development-only configuration
+appsettings.Development.json
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# OS-generated files
+.DS_Store
+Thumbs.db
